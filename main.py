@@ -3,7 +3,7 @@ from png import PNG
 
 def main() -> None:
     png = PNG("input.png")
-    png.check()
+    png.show()
 
 if __name__ == '__main__':
     main()

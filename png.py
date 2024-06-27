@@ -1,8 +1,8 @@
 import math
 
 from chunk import Chunk
-from reader import Reader
-from bitstring import BitArray
+from reader import Reader, BytesReader
+import pygame
 import zlib
 
 def byteint(byte):
@@ -17,7 +17,7 @@ class PNG:
         self.filter_type = None
         self.interlace_method = None
         self.width = None
-        self.decompressed = None
+        self.decompressed: None | bytes = None
 
         self.file = Reader(open(path, 'rb'))
         self.chunks: list[Chunk] = []
@@ -28,7 +28,6 @@ class PNG:
         self.read_chunks()
         self.read_header()
         self.decompress()
-
 
         self.scanlines = []
 
@@ -57,11 +56,11 @@ class PNG:
         self.filter_type = Reader.bytes_to_int(header.data[11:12])
         self.interlace_method = Reader.bytes_to_int(header.data[12:13])
 
-        print(self.width, self.height, self.bit_depth, self.color_type, self.compression, self.filter_type)
+        print(self.width, self.height, self.bit_depth, self.color_type, self.compression, self.filter_type, self.interlace_method)
 
     def decompress(self):
         data: Chunk = [chunk for chunk in self.chunks if chunk.chunk_type == b'IDAT'][0]
-        self.decompressed = zlib.decompress(data.data)
+        self.decompressed: bytes = zlib.decompress(data.data)
         print(self.decompressed[:100])
 
     def read(self):
@@ -69,12 +68,15 @@ class PNG:
         index = 0
         self.scanlines.append([])
         filter_type = None
-        print("first")
-        for i in range(len(self.decompressed)):
-            byte = self.decompressed[i:i+1]
+        reader = BytesReader(self.decompressed, self.bit_depth)
+        while True:
+            byte = reader.next()
+            if byte is None:
+                break
 
             if filter_type is None:
                 filter_type = int.from_bytes(byte, byteorder='little')
+
                 continue
 
             if filter_type == 0:
@@ -88,7 +90,8 @@ class PNG:
             if filter_type == 3:
                 a = self.scanlines[scanline][index - 3] if index - 3 >= 0 else 0
                 b = self.scanlines[scanline - 1][index]
-                self.scanlines[scanline].append((byteint(byte) + math.floor((a + b) % 256) / 2) % 256)
+                self.scanlines[scanline].append((byteint(byte) + ((a + b) // 2)) % 256)
+
             if filter_type == 4:
                 a = self.scanlines[scanline][index - 3] if index - 3 >= 0 else 0
                 b = self.scanlines[scanline - 1][index]
@@ -108,14 +111,35 @@ class PNG:
 
             index += 1
 
-            if index % 3 == 0 and index != 0:
-                print(self.scanlines[scanline][index - 3], self.scanlines[scanline][index - 2], self.scanlines[scanline][index - 1])
-
             if index == self.width * 3:
+                if scanline == 715:
+                    print(filter_type)
+
                 scanline += 1
                 index = 0
                 filter_type = None
                 self.scanlines.append([])
 
+    def get_pixel(self, x: int, y: int) -> tuple[int, int, int]:
+        px = x * 3
+        return self.scanlines[y][px], self.scanlines[y][px + 1], self.scanlines[y][px + 2]
 
+    def show(self):
+        pygame.init()
+        pygame.display.set_caption("PNG Viewer")
+        screen = pygame.display.set_mode((self.width, self.height))
 
+        print(len(self.scanlines[-1]))
+
+        for y in range(self.height):
+            for x in range(self.width):
+                screen.set_at((x, y), self.get_pixel(x, y))
+            pygame.display.flip()
+
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+
+            pygame.display.flip()
