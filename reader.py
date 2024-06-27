@@ -5,7 +5,7 @@ class Reader:
         self.file = file
         self.remaining_byte = b''
 
-    def read_bytes(self, n):
+    def read_bytes(self, n) -> bytes:
         return self.file.read(n)
 
     def read_bytes_as_int(self, n):
