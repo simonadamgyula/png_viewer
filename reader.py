@@ -28,27 +28,15 @@ class BytesReader:
         self.bit_depth = bit_depth
         self.current_byte = None
         self.byte_index = 0
-        self.remaining_bits = 0
-        self.in_byte_index = 0
 
-    def next(self):
-        if self.remaining_bits == 0:
-            self.current_byte = self.byte_string[self.byte_index]
-            self.in_byte_index = 0
-            self.byte_index += 1
-            self.remaining_bits = 8
-            if self.byte_index >= len(self.byte_string):
-                print(self.byte_index)
-                return None
+    def next_byte(self):
+        if self.byte_index >= len(self.byte_string):
+            return None
 
-        binary = bin(self.current_byte)[2:].zfill(self.bit_depth)
-        end = len(binary) - self.in_byte_index
-        start = end - self.bit_depth
+        self.current_byte = self.byte_string[self.byte_index]
+        self.byte_index += 1
 
-        self.in_byte_index += self.bit_depth
-        self.remaining_bits = len(binary) - self.in_byte_index
-
-        return self.bitstring_to_bytes(binary[start:end+1])
+        return self.bitstring_to_bytes((bin(self.current_byte)[2:]).zfill(8))
 
     @staticmethod
     def bitstring_to_bytes(s):
