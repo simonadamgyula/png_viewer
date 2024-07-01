@@ -13,6 +13,10 @@ def extractBits(number, num, start_pos):
     binary = bin(number)[2:].zfill(8)
     return int(binary[start_pos:start_pos+num], 2)
 
+def set_opacity(color: tuple[int, int, int], opacity: int) -> tuple[int, ...]:
+    transparency = (opacity / 255) if opacity > 0 else 0
+    return tuple(map(lambda x: int(x * transparency), color))
+
 class PNG:
     def __init__(self, path):
         self.height = None
@@ -24,6 +28,7 @@ class PNG:
         self.width = None
         self.decompressed: None | bytes = None
         self.palette: None | list[tuple[int, int, int]] = None
+        self.transparency: None | int | tuple[int, int, int] | list[int] = None
 
         self.file = Reader(open(path, 'rb'))
         self.chunks: list[Chunk] = []
@@ -49,8 +54,6 @@ class PNG:
             chunk = Chunk(self.file)
             self.chunks.append(chunk)
 
-            print(chunk.chunk_type)
-
             if chunk.chunk_type == b'IEND':
                 break
 
@@ -64,8 +67,18 @@ class PNG:
         self.filter_type = Reader.bytes_to_int(header.data[11:12])
         self.interlace_method = Reader.bytes_to_int(header.data[12:13])
 
-        print(self.width, self.height, self.bit_depth, self.color_type, self.compression, self.filter_type,
-              self.interlace_method)
+    def read_trns(self):
+        trnss: list[Chunk] = list(filter(lambda chunk: chunk.chunk_type == b'tRNS', self.chunks))
+        if not trnss:
+            return
+
+        trns = trnss[0]
+        if self.color_type == 0:
+            self.transparency = Reader.bytes_to_int(trns.data)
+        if self.color_type == 2:
+            self.transparency = tuple([Reader.bytes_to_int(trns.data[i:i+2]) for i in range(3)])
+        if self.color_type == 3:
+            self.transparency = [Reader.bytes_to_int(trns.data[i:i+1]) for i in range(trns.length)]
 
     def read_palette(self):
         palette_chunks: list[Chunk] = list(filter(lambda chunk: chunk.chunk_type == b'PLTE', self.chunks))
@@ -83,21 +96,33 @@ class PNG:
             self.palette.append((red, green, blue))
 
     def decompress(self):
-        data: Chunk = [chunk for chunk in self.chunks if chunk.chunk_type == b'IDAT'][0]
-        self.decompressed: bytes = zlib.decompress(data.data)
+        data_chunks: list[Chunk] = [chunk for chunk in self.chunks if chunk.chunk_type == b'IDAT']
+        data = bytes()
+        for chunk in data_chunks:
+            data += chunk.data
+
+        self.decompressed: bytes = zlib.decompress(data)
 
     def read(self):
         if self.color_type == 0:
             line_bytes = self.width
+            pixel_step = 1
         elif self.color_type == 2:
+            pixel_step = 3
             line_bytes = self.width * 3
         elif self.color_type == 3:
+            pixel_step = 1
             line_bytes = self.width
         elif self.color_type == 4:
+            pixel_step = 2
+            line_bytes = self.width * 2
+        elif self.color_type == 6:
+            pixel_step = 4
             line_bytes = self.width * 4
         else:
-            print("Sorry, this program only supports PNG color type of Truecolor or Indexed-color (2, 3)")
-            raise TypeError("Color type not supported")
+            raise TypeError("wrong PNG color type")
+
+        print("Processing image ...")
 
         scanline = 0
         index = 0
@@ -111,13 +136,12 @@ class PNG:
 
             if filter_type is None:
                 filter_type = int.from_bytes(byte, byteorder='little')
-                print(filter_type)
                 continue
 
             unfiltered_byte = None
 
             prev_line = scanline - 1
-            prev_index = (index - 3 * self.bit_depth // 8) if self.bit_depth >= 8 and self.color_type != 0 else index - 1
+            prev_index = (index - pixel_step) if self.bit_depth >= 8 and self.color_type != 0 else index - 1
 
             a = self.scanlines[scanline][prev_index] if prev_index >= 0 else 0
             b = self.scanlines[prev_line][index] if prev_line >= 0 else 0
@@ -127,7 +151,6 @@ class PNG:
                 unfiltered_byte = byteint(byte)
             if filter_type == 1:
                 unfiltered_byte = (byteint(byte) + a) % 256
-                print(a, prev_index, index, unfiltered_byte)
             if filter_type == 2:
                 unfiltered_byte = (byteint(byte) + b) % 256
             if filter_type == 3:
@@ -161,23 +184,34 @@ class PNG:
 
         self.scanlines.pop()
 
-        print(self.scanlines[:20])
-
-    def get_pixel(self, x: int, y: int) -> tuple[int, int, int] | tuple[int, int, int, int]:
+    def get_pixel(self, x: int, y: int) -> tuple[int, ...]:
         if self.color_type == 0:
             color = self.scanlines[y][x]
-            return color, color, color
+            if self.transparency is None or self.transparency != color:
+                return color, color, color
+
+            return set_opacity((color, color, color), 0)
         if self.color_type == 2:
             px = x * 3
-            return self.scanlines[y][px], self.scanlines[y][px + 1], self.scanlines[y][px + 2]
+            color = self.scanlines[y][px], self.scanlines[y][px + 1], self.scanlines[y][px + 2]
+            if self.transparency is None or self.transparency != color:
+                return color
+
+            return set_opacity(color, 0)
         if self.color_type == 3:
             index = self.scanlines[y][x]
-            return self.palette[index]
+            if self.transparency is None or len(self.transparency) <= index:
+                return self.palette[index]
+
+            return set_opacity(self.palette[index], self.transparency[index])
         if self.color_type == 4:
             px = x * 2
             color = self.scanlines[y][px]
             alpha = self.scanlines[y][px + 1]
-            return color, color, color, alpha
+            return set_opacity((color, color, color), alpha)
+        if self.color_type == 6:
+            px = x * 4
+            return set_opacity((self.scanlines[y][px], self.scanlines[y][px + 1], self.scanlines[y][px + 2]), self.scanlines[y][px + 3])
 
 
     def show(self):
@@ -189,7 +223,8 @@ class PNG:
 
         for y in range(self.height):
             for x in range(self.width):
-                screen.set_at((x, y), self.get_pixel(x, y))
+                color = self.get_pixel(x, y)
+                screen.set_at((x, y), color)
             pygame.display.flip()
 
         running = True
