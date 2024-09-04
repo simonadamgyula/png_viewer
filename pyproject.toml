@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "png-viewer"
+version = "0.1.0"
+description = "A png viewer made in python, from scratch."
+authors = ["simonadamgyula <simon.adam.gyula@students.jedlik.eu>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pygame = "^2.6.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
