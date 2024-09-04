@@ -1,4 +1,5 @@
 # PNG viewer in python
+![Screenshot of running app](https://github.com/simonadamgyula/png_viewer/blob/cab580f5ca7209e68af53cb41025fd86fd8295b2/screenshot.png)
 
 This project was made for me to learn how png encoding worked
 
